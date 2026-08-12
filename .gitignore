@@ -2,9 +2,8 @@
 node_modules/
 dist/
 
-# 环境
+# 环境（.env 含密钥不提交; .env.example 是配置模板, 保持提交）
 .env
-.env.example
 
 # IDE
 .vscode/
