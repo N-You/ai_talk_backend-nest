@@ -1,4 +1,10 @@
+# 依赖
 node_modules/
 dist/
 
+# 环境
 .env
+.env.example
+
+# IDE
+.vscode/
