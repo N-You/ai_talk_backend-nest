@@ -6,6 +6,7 @@ import { UserModule } from "./user/user.module";
 import { ScenarioModule } from "./scenario/scenario.module";
 import { ConversationModule } from "./conversation/conversation.module";
 import { LearningModule } from "./learning/learning.module";
+import { SpeechModule } from "./speech/speech.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { LearningModule } from "./learning/learning.module";
     ScenarioModule,
     ConversationModule,
     LearningModule,
+    SpeechModule,
   ],
 })
 export class AppModule {}
