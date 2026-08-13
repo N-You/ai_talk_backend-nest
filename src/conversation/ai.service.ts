@@ -13,6 +13,9 @@ export class AiService {
     this.model = this.config.get<string>("ai.model") ?? "gpt-4o-mini";
   }
 
+  /**
+   * 非流式调用（保留：TTS / 其他一次性场景）。
+   */
   async chat(
     messages: { role: string; content: string }[],
     userSettings?: { apiKey?: string; apiBase?: string; model?: string },
@@ -46,6 +49,87 @@ export class AiService {
 
     const json: any = await res.json();
     return json.choices[0]?.message?.content ?? "Sorry, I didn't get that.";
+  }
+
+  /**
+   * 流式调用：async generator，逐块 yield 增量文本。
+   *
+   * 关键设计：
+   * - OpenAI 兼容接口 `stream: true`，用 fetch ReadableStream 逐块解析 SSE
+   * - 无 Key 时直接 yield 一条 fallback 回复（体验一致，不抛错）
+   * - 网络/接口错误时抛异常，由调用方决定降级策略
+   * - 支持 AbortSignal：客户端断开时中断生成，节省 token
+   */
+  async *chatStream(
+    messages: { role: string; content: string }[],
+    userSettings?: { apiKey?: string; apiBase?: string; model?: string },
+    signal?: AbortSignal,
+  ): AsyncGenerator<string> {
+    const key = userSettings?.apiKey || this.apiKey;
+    const base = userSettings?.apiBase || this.apiBase;
+    const model = userSettings?.model || this.model;
+
+    if (!key) {
+      yield this.fallback(messages[messages.length - 1]?.content ?? "");
+      return;
+    }
+
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      signal,
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: 256,
+        temperature: 0.7,
+        stream: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`LLM stream error ${res.status}: ${detail.slice(0, 200)}`);
+    }
+    if (!res.body) {
+      throw new Error("LLM stream: no response body");
+    }
+
+    // 逐块解析 SSE：data: {...}\n\n，结束标记 data: [DONE]
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        // 按行切分；保留最后一段不完整的行
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (data === "[DONE]") return;
+          try {
+            const json: any = JSON.parse(data);
+            const delta: string | undefined = json?.choices?.[0]?.delta?.content;
+            if (delta) yield delta;
+          } catch {
+            // 忽略无法解析的行
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 
   private fallback(userMsg: string): string {

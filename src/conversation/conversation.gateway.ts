@@ -19,8 +19,13 @@ import { AuthService } from "../auth/auth.service";
 import { AiService } from "./ai.service";
 
 /**
- * 原生 WebSocket 网关（兼容 H5 / 微信小程序 / App）
+ * 原生 WebSocket 网关（H5 优先，协议与 uni.connectSocket 兼容）
  * 协议：客户端发送 {"event":"...","data":{...}}，服务端回 {"event":"...","data":{...}}
+ *
+ * Streaming 事件协议：
+ * - ai_stream: data { delta }      生成中的增量文本（多次）
+ * - ai_done:   data { text }       完整文本（结束，前端用于固化消息）
+ * - ai_error:  data { message }    生成失败
  */
 @WebSocketGateway({ path: "/ws/conversations" })
 export class ConversationGateway implements OnGatewayConnection {
@@ -65,6 +70,11 @@ export class ConversationGateway implements OnGatewayConnection {
     return { event: "joined", data: { conversation_id: body.conversation_id } };
   }
 
+  /**
+   * Streaming 对话入口。
+   * 注意：不能用 @SubscribeMessage 的 return（那是一次性响应），
+   * 流式必须直接 client.send 逐块推送。
+   */
   @SubscribeMessage("text")
   async handleText(@ConnectedSocket() client: WebSocket, @MessageBody() body: { conversation_id: number; content: string }) {
     const userId = this.userIds.get(client);
@@ -82,7 +92,7 @@ export class ConversationGateway implements OnGatewayConnection {
     });
     if (!conv) return { event: "error", data: { message: "Conversation not found" } };
 
-    // 保存用户消息
+    // 保存用户消息（立即落库）
     await this.convService.addMessage(conversation_id, "user", content);
 
     // 获取最近历史消息
@@ -105,13 +115,44 @@ export class ConversationGateway implements OnGatewayConnection {
       })),
     ];
 
-    // 读取用户自定义 AI 配置，调用模型
+    // 读取用户自定义 AI 配置
     const u = await this.userRepo.findOneBy({ id: conv.user_id });
-    const aiResponse = await this.aiService.chat(messages, u?.settings ?? undefined);
+    const settings = u?.settings ?? undefined;
 
-    // 保存 AI 消息
-    await this.convService.addMessage(conversation_id, "assistant", aiResponse);
+    // 客户端断开时中断生成（AbortController 节省 token）
+    const ac = new AbortController();
+    const onClose = () => ac.abort();
+    client.on("close", onClose);
 
-    return { event: "ai_response", data: { text: aiResponse } };
+    let fullText = "";
+    try {
+      for await (const delta of this.aiService.chatStream(messages, settings, ac.signal)) {
+        fullText += delta;
+        // 客户端可能已断开：发送前检测，避免向已关闭连接写入
+        if (client.readyState !== WebSocket.OPEN) return;
+        client.send(JSON.stringify({ event: "ai_stream", data: { delta } }));
+      }
+
+      if (!fullText) fullText = "Sorry, I didn't get that.";
+
+      // 流结束：完整文本落库
+      await this.convService.addMessage(conversation_id, "assistant", fullText);
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ event: "ai_done", data: { text: fullText } }));
+      }
+    } catch (err) {
+      if (ac.signal.aborted) {
+        // 客户端主动断开，不落库、不报错
+        return;
+      }
+      console.error("[gateway] stream error:", (err as Error).message);
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(
+          JSON.stringify({ event: "ai_error", data: { message: "AI 回复失败，请重试" } }),
+        );
+      }
+    } finally {
+      client.off("close", onClose);
+    }
   }
 }
