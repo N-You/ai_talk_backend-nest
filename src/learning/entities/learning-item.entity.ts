@@ -15,6 +15,10 @@ import {
 } from "typeorm";
 import { UserLearning } from "./user-learning.entity";
 
+/**
+ * 学习内容字典实体：全局共享的单词/短语/句子/表达，与用户通过 user_learning 多对多关联。
+ * 一个 content 只在字典里存一份，避免每用户冗余。
+ */
 @Entity("learning_items")
 export class LearningItem {
   @PrimaryGeneratedColumn()

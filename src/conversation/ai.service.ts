@@ -1,6 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
+/**
+ * LLM 调用层：封装 OpenAI 兼容 chat/completions 协议。
+ * - 用户自定义配置（userSettings）优先，回落 .env 默认（构造时注入）
+ * - 无 Key 时走 fallback 模板回复（"聊天可编"降级策略）
+ * - 智谱端点自动关闭思考模式（thinking.disabled），省 token 提速
+ */
 @Injectable()
 export class AiService {
   private apiKey: string;
@@ -21,7 +27,7 @@ export class AiService {
     userSettings?: { apiKey?: string; apiBase?: string; model?: string },
   ): Promise<string> {
     const key = userSettings?.apiKey || this.apiKey;
-    const base = userSettings?.apiBase || this.apiBase;
+    const base = (userSettings?.apiBase || this.apiBase).replace(/\/$/, "");
     const model = userSettings?.model || this.model;
 
     if (!key) {
@@ -39,6 +45,9 @@ export class AiService {
         messages,
         max_tokens: 256,
         temperature: 0.7,
+        // 智谱推理模型默认先输出思维链(reasoning_content)，会挤占 max_tokens 且拖慢首字
+        // 仅对智谱端点关闭思考模式；OpenAI 官方 API 不识别该参数，不能无条件携带
+        ...(base.includes("bigmodel.cn") ? { thinking: { type: "disabled" } } : {}),
       }),
     });
 
@@ -66,7 +75,7 @@ export class AiService {
     signal?: AbortSignal,
   ): AsyncGenerator<string> {
     const key = userSettings?.apiKey || this.apiKey;
-    const base = userSettings?.apiBase || this.apiBase;
+    const base = (userSettings?.apiBase || this.apiBase).replace(/\/$/, "");
     const model = userSettings?.model || this.model;
 
     if (!key) {
@@ -87,6 +96,8 @@ export class AiService {
         max_tokens: 256,
         temperature: 0.7,
         stream: true,
+        // 仅智谱端点关闭思考模式（理由同 chat 方法）
+        ...(base.includes("bigmodel.cn") ? { thinking: { type: "disabled" } } : {}),
       }),
     });
 
@@ -132,6 +143,11 @@ export class AiService {
     }
   }
 
+  /**
+   * 内置兜底回复：无 Key 或 API 失败时随机返回一条模板英文。
+   * 与语音模块"宁错不编"不同——对话是练习场景，编造温和回复无害，
+   * 保证体验不中断。
+   */
   private fallback(userMsg: string): string {
     const replies = [
       "That's interesting! Can you tell me more?",

@@ -8,6 +8,10 @@ import {
 } from "typeorm";
 import { Conversation } from "./conversation.entity";
 
+/**
+ * 消息实体：对话中的单条 user/assistant 消息。
+ * 随会话级联删除；language 标记语种（en/zh/mix，供后续统计）。
+ */
 @Entity("messages")
 export class Message {
   @PrimaryGeneratedColumn()

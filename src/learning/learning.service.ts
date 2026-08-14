@@ -1,9 +1,16 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { LearningItem, LearningItemType } from "./entities/learning-item.entity";
 import { UserLearning } from "./entities/user-learning.entity";
 
+/**
+ * 间隔重复（SM-2 简化）调度规则：
+ * - again 忘记：mastery -20，10 分钟后重来
+ * - hard  模糊：mastery +5，1 天后
+ * - good  认识：mastery +15，3 天后
+ * - easy  熟练：mastery +25，7 天后
+ */
 const REVIEW_RULES: Record<string, { masteryDelta: number; minutes?: number; days?: number }> = {
   again: { masteryDelta: -20, minutes: 10 },
   hard: { masteryDelta: 5, days: 1 },
@@ -18,7 +25,14 @@ export class LearningService {
     @InjectRepository(UserLearning) private readonly ulRepo: Repository<UserLearning>,
   ) {}
 
-  async list(userId: number, page = 1, size = 20, type?: string, status?: string) {
+  /**
+   * 分页查询用户学习项：
+   * - leftJoin learning_item 联表取内容/释义等
+   * - type 过滤类型；status=review 过滤 mastery<80（待复习）、mastered ≥80（已掌握）
+   * - search 用 ILIKE 模糊匹配 content/meaning
+   * - 按 next_review_at 升序（NULLS LAST），"待复习"的自然浮到最前
+   */
+  async list(userId: number, page = 1, size = 20, type?: string, status?: string, search?: string) {
     const qb = this.ulRepo
       .createQueryBuilder("ul")
       .leftJoinAndSelect("ul.learning_item", "li")
@@ -27,6 +41,10 @@ export class LearningService {
     if (type) qb.andWhere("li.type = :type", { type });
     if (status === "review") qb.andWhere("ul.mastery < 80");
     if (status === "mastered") qb.andWhere("ul.mastery >= 80");
+    if (search?.trim()) {
+      const kw = `%${search.trim()}%`;
+      qb.andWhere("(li.content ILIKE :kw OR li.meaning ILIKE :kw)", { kw });
+    }
 
     qb.orderBy("ul.next_review_at", "ASC", "NULLS LAST");
 
@@ -60,8 +78,14 @@ export class LearningService {
     };
   }
 
+  /**
+   * 幂等添加：content 小写化后查重 learning_items（全局字典表），
+   * 再查重 user_learning（用户关联表），两处都"存在即复用"，不会产生重复记录。
+   */
   async add(userId: number, content: string) {
     content = content.trim().toLowerCase();
+    if (!content) throw new BadRequestException("Content is required");
+    if (content.length > 500) throw new BadRequestException("Content too long (max 500 chars)");
     let item = await this.itemRepo.findOneBy({ content });
     if (!item) {
       item = this.itemRepo.create({ content, type: LearningItemType.WORD });
@@ -89,6 +113,10 @@ export class LearningService {
     await this.ulRepo.remove(ul);
   }
 
+  /**
+   * 复习调度：查 REVIEW_RULES 表更新 mastery（clamp 0-100）与 next_review_at。
+   * result 非法（不在表中）抛 404。
+   */
   async review(userId: number, id: number, result: string) {
     const rule = REVIEW_RULES[result];
     if (!rule) throw new NotFoundException("Invalid review result");

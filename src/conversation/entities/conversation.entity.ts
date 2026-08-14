@@ -11,6 +11,10 @@ import { User } from "../../user/entities/user.entity";
 import { Scenario } from "../../scenario/entities/scenario.entity";
 import { Message } from "./message.entity";
 
+/**
+ * 会话实体：一次场景对话的元数据（起止时间、时长、评分、英语使用率）。
+ * 关联 user（级联删除）与 scenario（删除场景则置空，保留历史）。
+ */
 @Entity("conversations")
 export class Conversation {
   @PrimaryGeneratedColumn()

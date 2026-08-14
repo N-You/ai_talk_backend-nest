@@ -1,5 +1,10 @@
+/**
+ * 集中配置工厂：把 process.env 归整为带默认值的命名空间对象。
+ * 业务侧通过 ConfigService.get("speech.dashscopeApiKey") 点号路径取用，
+ * 环境变量不散落各处，默认值兜底保证本地零配置可启动。
+ */
 export default () => ({
-  port: parseInt(process.env.PORT ?? "8000", 10),
+  port: parseInt(process.env.PORT ?? "8002", 10),
 
   database: {
     host: process.env.DB_HOST ?? "localhost",

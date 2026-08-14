@@ -9,12 +9,16 @@ import {
 import { Conversation } from "../../conversation/entities/conversation.entity";
 import { UserLearning } from "../../learning/entities/user-learning.entity";
 
+/**
+ * 用户实体：昵称唯一（H5 免注册的登录凭据）。
+ * settings 为 JSON 列，存用户自定义 AI 配置 { apiKey?, apiBase?, model? }。
+ */
 @Entity("users")
 export class User {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ length: 64 })
+  @Column({ length: 64, unique: true })
   nickname: string;
 
   @Column({ length: 512, nullable: true })

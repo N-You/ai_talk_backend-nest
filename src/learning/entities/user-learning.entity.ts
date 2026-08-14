@@ -10,6 +10,10 @@ import {
 import { User } from "../../user/entities/user.entity";
 import { LearningItem } from "./learning-item.entity";
 
+/**
+ * 用户-学习项关联实体：记录每个用户对某学习项的掌握状态（间隔重复核心状态机）。
+ * mastery 0-100、encounter_count 遇到次数、next_review_at 下次复习时间。
+ */
 @Entity("user_learning")
 export class UserLearning {
   @PrimaryGeneratedColumn()

@@ -1,6 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from "typeorm";
 import { Conversation } from "../../conversation/entities/conversation.entity";
 
+/**
+ * 对话场景实体：定义 AI 扮演的角色、用户角色、系统提示词与难度。
+ * 系统提示词（system_prompt）在会话网关中被拼进 LLM 消息，决定 AI 的扮演风格。
+ */
 @Entity("scenarios")
 export class Scenario {
   @PrimaryGeneratedColumn()

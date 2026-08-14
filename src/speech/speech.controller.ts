@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Post,
+  ServiceUnavailableException,
   StreamableFile,
   UploadedFile,
   UseGuards,
@@ -30,6 +31,21 @@ import { SpeechService } from "./speech.service";
 export class SpeechController {
   constructor(private readonly speech: SpeechService) {}
 
+  /** 把 provider 抛出的"配置缺失"错误转成 503 + 可读信息，避免裸 500 堆栈 */
+  private friendly(e: unknown): never {
+    if (e instanceof Error && e.message.includes("not configured")) {
+      throw new ServiceUnavailableException(
+        "语音服务未配置：请在后端 .env 中填写 DASHSCOPE_API_KEY（阿里云百炼）后重启",
+      );
+    }
+    throw e;
+  }
+
+  /**
+   * 语音转写（ASR）：multipart 上传 ≤25MB 音频 → 文本。
+   * - mime 兜底：octet-stream 按扩展名推断，避免误杀合法录音
+   * - 配置缺失错误经 friendly() 转 503 中文提示
+   */
   @Post("transcribe")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 25 * 1024 * 1024 } }))
   async transcribe(
@@ -62,12 +78,16 @@ export class SpeechController {
       throw new BadRequestException(`Unsupported content type: ${file.mimetype}`);
     }
 
-    return this.speech.transcribe({
-      audio: file.buffer,
-      mimeType,
-      language: language || undefined,
-      model: model || undefined,
-    });
+    try {
+      return await this.speech.transcribe({
+        audio: file.buffer,
+        mimeType,
+        language: language || undefined,
+        model: model || undefined,
+      });
+    } catch (e) {
+      this.friendly(e);
+    }
   }
 
   /**
@@ -81,14 +101,22 @@ export class SpeechController {
     if (!text) {
       throw new BadRequestException("Missing text");
     }
-    const result = await this.speech.synthesize({
-      text,
-      voice: body.voice || undefined,
-      speed: body.speed,
-    });
-    return new StreamableFile(result.audio, {
-      type: result.mimeType,
-      disposition: `inline; filename="tts.wav"`,
-    });
+    // 阿里云 TTS 单次合成有字数上限，超长会 4xx 报错（且浪费额度）
+    if (text.length > 1000) {
+      throw new BadRequestException("Text too long (max 1000 chars)");
+    }
+    try {
+      const result = await this.speech.synthesize({
+        text,
+        voice: body.voice || undefined,
+        speed: body.speed,
+      });
+      return new StreamableFile(result.audio, {
+        type: result.mimeType,
+        disposition: `inline; filename="tts.wav"`,
+      });
+    } catch (e) {
+      this.friendly(e);
+    }
   }
 }
