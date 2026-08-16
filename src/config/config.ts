@@ -36,6 +36,12 @@ export default () => ({
     dashscopeApiKey: process.env.DASHSCOPE_API_KEY ?? "",
     asrProvider: process.env.SPEECH_ASR_PROVIDER ?? "dashscope",
     asrModel: process.env.SPEECH_ASR_MODEL ?? "qwen3-asr-flash",
+    // ASR 逆文本正则化：默认关闭（英语学习场景保留数字原文更有益），
+    // 需要"123 → one hundred twenty three 还原为 123"时置 SPEECH_ASR_ENABLE_ITN=true
+    enableItn: process.env.SPEECH_ASR_ENABLE_ITN === "true",
+    // ASR 语言提示（asr_options.language）：留空 = 自动检测（推荐，支持中英混合）；
+    // 确定单语种可填 en / zh 等提升准确率
+    asrLanguage: process.env.SPEECH_ASR_LANGUAGE ?? "",
     ttsProvider: process.env.SPEECH_TTS_PROVIDER ?? "dashscope",
     ttsModel: process.env.SPEECH_TTS_MODEL ?? "qwen-audio-3.0-tts-flash",
     ttsVoice: process.env.SPEECH_TTS_VOICE ?? "longanhuan_v3.6",

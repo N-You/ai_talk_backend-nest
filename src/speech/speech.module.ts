@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { SpeechController } from "./speech.controller";
 import { SpeechService } from "./speech.service";
+import { ChunkStoreService } from "./chunk-store.service";
 import { ASR_BACKEND, TTS_BACKEND } from "./speech.constants";
 import { ASRBackend } from "./interfaces/asr-backend.interface";
 import { TTSBackend } from "./interfaces/tts-backend.interface";
@@ -20,6 +21,7 @@ import { AliyunTtsBackend } from "./backends/aliyun-tts.backend";
   controllers: [SpeechController],
   providers: [
     SpeechService,
+    ChunkStoreService, // 分片上传暂存（内存 + TTL）
     {
       provide: ASR_BACKEND,
       inject: [ConfigService],
