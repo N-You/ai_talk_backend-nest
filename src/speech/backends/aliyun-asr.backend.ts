@@ -2,29 +2,14 @@ import { ConfigService } from "@nestjs/config";
 import { ASRBackend, TranscribeInput, TranscribeResult } from "../interfaces/asr-backend.interface";
 
 /**
- * 阿里云百炼 Qwen3-ASR-Flash 实现 (OpenAI 兼容模式)。
- *
- * 通过实测选型 (2026-08): qwen-audio-3.0-asr-flash 的 multimodal-generation
- * 接口要求音频公网 URL (服务端 wget 下载, base64 直传报 "Argument list too long");
- * 而 qwen3-asr-flash 走 compatible-mode/v1/chat/completions, 支持 base64 data URI
- * 直传 —— 免 URL、免 OSS、免转码。这也是三个 provider 里实现最干净的。
- *
- * 关键点 (2026-08 官方文档核实):
- * - data URI 格式: data:audio/{fmt};base64,{b64}
- * - 原生支持 webm/opus/m4a 等 18 种格式 (智谱时代"只收 wav/mp3"的转码问题消失)
- * - **base64 后大小上限 10MB** → 原始音频建议 ≤7MB。超长语音必须切段/缩短,
- *   否则 DashScope 直接 4xx 拒绝 → 这是"长语音识别失败"的根因之一
- * - asr_options 支持 language (en/zh/... 单一语种提示, 中英混合请勿指定) 与
- *   enable_itn (逆文本正则化, 默认 false)
- * - 按音频时长计费 0.00022 元/秒, 新用户 10 小时免费额度
- *
- * 本次参数调优 (2026-08):
- * 1. asr_options 从写死 { enable_itn: false } 改为走配置 (SPEECH_ASR_ENABLE_ITN)
- * 2. 支持 language 提示 (SPEECH_ASR_LANGUAGE 全局 / TranscribeInput.language 单次),
- *    留空则自动检测 —— 本应用是中英混合场景, 默认留空最准
- * 3. 请求 60s 超时 (AbortController) + 5xx/429/网络错误指数退避重试 (最多 2 次),
- *    避免偶发超时直接让用户"识别失败"
- * 4. 入参大小守卫: >7MB 直接拒绝并给出中文提示 (防 base64 超 10MB 上限)
+ * 阿里云百炼 Qwen3-ASR-Flash 实现（OpenAI 兼容模式，compatible-mode/v1/chat/completions）。
+ * 关键点（官方文档核实）：
+ * - 音频以 data URI 直传：data:audio/{fmt};base64,{b64}，免 URL、免 OSS、免转码
+ * - 原生支持 webm/opus/m4a 等格式
+ * - base64 后大小上限 10MB → 原始音频 ≤7MB（超长语音必须切段/缩短，否则 DashScope 4xx 拒绝）
+ * - asr_options 支持 language（单语种提示，中英混合请勿指定）与 enable_itn（默认 false，
+ *   英语学习场景保留数字原文更有益）
+ * - 请求 60s 超时（AbortController）+ 5xx/429/网络错误指数退避重试（最多 2 次）
  */
 
 /** 原始音频大小上限 (字节): base64 膨胀 ≈1.37 倍, 7MB → ~9.6MB, 低于 10MB 硬限 */

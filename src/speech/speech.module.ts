@@ -10,12 +10,8 @@ import { AliyunAsrBackend } from "./backends/aliyun-asr.backend";
 import { AliyunTtsBackend } from "./backends/aliyun-tts.backend";
 
 /**
- * 语音模块。
- *
- * 复刻 voicebox backend/backends/__init__.py 的工厂思想:
- * - get_stt_backend() / get_tts_backend_for_engine() -> 这里 useFactory 按配置选 provider
- * - 单例语义: Nest DI 默认单例
- * - 当前仅保留阿里云百炼 (DashScope) 后端; 将来新增实现 = 新增一个 case + 一个实现类, 上层零改动
+ * 语音模块：ASR/TTS 按配置（speech.asrProvider / speech.ttsProvider）选择 provider 实现。
+ * 当前仅阿里云百炼（DashScope）；新增实现 = 新增一个 case + 一个实现类，上层零改动。
  */
 @Module({
   controllers: [SpeechController],

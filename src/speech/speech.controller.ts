@@ -19,23 +19,13 @@ import { ChunkStoreService } from "./chunk-store.service";
 
 /**
  * 语音转写端点。
- *
- * 对应 voicebox backend/routes/transcription.py, 但省掉了它的两个工程负担:
- * 1. 临时文件: voicebox 用 1MB 分块写 tempfile (Python 生态习惯), Node 里
- *    multer 默认 memoryStorage, Buffer 直接进内存, 无需落盘
- * 2. 格式转码: voicebox 必须 librosa 解码 -> 重编码 WAV 喂 Whisper (本地解码器
- *    限制), 云端 API 原生支持 webm/ogg, 原始 Buffer 直传
- *
- * voicebox 的 HTTP 202 + 后台下载模式同样不需要: 那是本地模型懒加载的产物,
- * 云端模型不存在"首次下载"问题。若将来本地 sidecar 接入, 该模式由 provider
- * 层自行引入, 不污染本路由。
- *
- * 2026-08 优化:
- * - 直传加"原始音频 ≤7MB"守卫 (DashScope base64 10MB 硬上限, 见
- *   aliyun-asr.backend.ts 注释) —— 超长音频 413 明确报错, 不再裸 4xx 500
- * - 新增 POST /api/speech/transcribe-chunked 分片上传:
- *   前端把大文件切成 1MB/片顺序传, 末片到达后服务端拼接 → 转写 → 返回结果。
- *   分片在内存暂存 (ChunkStoreService, 10 分钟 TTL), 单片失败只需重传单片。
+ * - 直传（≤7MB）：音频直接进内存（multer memoryStorage），云端 API 原生支持
+ *   webm/ogg 等格式，无需落盘与转码
+ * - 分片（>7MB）：POST /api/speech/transcribe-chunked，前端按 1MB/片顺序上传，
+ *   末片到达后服务端拼接转写；分片内存暂存（ChunkStoreService，10 分钟 TTL），
+ *   单片失败只需重传单片
+ * - 直传守卫：原始音频 ≤7MB（DashScope base64 10MB 硬上限，见 aliyun-asr.backend.ts），
+ *   超长音频 413 明确报错，不再裸 4xx/500
  */
 
 /** 直传原始音频上限 (字节): base64 膨胀后约 1.37 倍, 需 < DashScope 10MB 硬限 */
@@ -195,7 +185,6 @@ export class SpeechController {
 
   /**
    * 语音合成 (TTS): 文本 -> 音频流。
-   * 对应 voicebox 的 /generate 简化版 (无声音克隆/多版本管理)。
    * body: { text, voice?, speed? }, 返回 audio/wav 二进制。
    */
   @Post("tts")

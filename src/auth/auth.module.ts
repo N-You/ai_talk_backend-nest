@@ -16,7 +16,7 @@ import { User } from "../user/entities/user.entity";
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => ({
-        secret: cfg.get<string>("jwt.secret") ?? "dev-secret",
+        secret: cfg.get<string>("jwt.secret")!, // 配置工厂已兜底默认值
         signOptions: { expiresIn: cfg.get<string>("jwt.expires") ?? "7d" },
       }),
     }),

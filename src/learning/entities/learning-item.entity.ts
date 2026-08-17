@@ -1,10 +1,3 @@
-export enum LearningItemType {
-  WORD = "WORD",
-  PHRASE = "PHRASE",
-  SENTENCE = "SENTENCE",
-  EXPRESSION = "EXPRESSION",
-}
-
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -14,6 +7,14 @@ import {
   OneToMany,
 } from "typeorm";
 import { UserLearning } from "./user-learning.entity";
+
+/** 学习内容类型（对话中"记录表达"按此归类） */
+export enum LearningItemType {
+  WORD = "WORD",
+  PHRASE = "PHRASE",
+  SENTENCE = "SENTENCE",
+  EXPRESSION = "EXPRESSION",
+}
 
 /**
  * 学习内容字典实体：全局共享的单词/短语/句子/表达，与用户通过 user_learning 多对多关联。

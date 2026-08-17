@@ -4,11 +4,8 @@ import { ASRBackend, TranscribeInput, TranscribeResult } from "./interfaces/asr-
 import { TTSBackend, TTSInput, TTSResult } from "./interfaces/tts-backend.interface";
 
 /**
- * 语音服务门面 (facade)。
- *
- * 对应 voicebox backend/services/transcribe.py + tts.py —— 极薄门面,
- * 不承载业务逻辑, 只把上层请求转交给后端抽象层。
- * 业务方 (Agent 状态机 / Controller) 只依赖本门面, 不感知具体 provider。
+ * 语音服务门面（facade）：极薄转发层，不承载业务逻辑。
+ * 上层只依赖本门面，不感知具体 provider；实现类通过 DI token 注入（见 speech.module）。
  */
 @Injectable()
 export class SpeechService {

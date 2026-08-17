@@ -5,18 +5,22 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from "typeorm";
 import { Conversation } from "./conversation.entity";
 
 /**
  * 消息实体：对话中的单条 user/assistant 消息。
  * 随会话级联删除；language 标记语种（en/zh/mix，供后续统计）。
+ * conversation_id 显式建索引：PostgreSQL 不会自动为外键建索引，
+ * 而"按会话查最近 N 条历史"是每轮对话的高频查询，无索引会随数据量退化。
  */
 @Entity("messages")
 export class Message {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @Column()
   conversation_id: number;
 

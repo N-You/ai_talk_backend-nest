@@ -1,11 +1,6 @@
 /**
- * TTS (Text-to-Speech) 后端契约
- *
- * 复刻 voicebox TTSBackend Protocol 的抽象思想。
- * 刻意精简: voicebox 的 TTSBackend 还有 create_voice_prompt / combine_voice_prompts
- * (声音克隆链路), 云端 TTS 用预设 voice id 即可, 克隆留作后续扩展。
- *
- * Phase 0 只建契约 + 注册位, 实现与路由在 Phase 1 (voicebox TTS 模块分析后) 接入。
+ * TTS（文本转语音）后端契约。
+ * 云端 TTS 用预设 voice id 即可；isLoaded/unload 为本地模型预留扩展位。
  */
 export interface TTSBackend {
   /** 后端标识, 如 "openai" / "volcengine" / "kokoro-local" */

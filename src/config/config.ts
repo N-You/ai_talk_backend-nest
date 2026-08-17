@@ -28,10 +28,12 @@ export default () => ({
     apiKey: process.env.OPENAI_API_KEY ?? "",
     apiBase: process.env.OPENAI_API_BASE ?? "https://api.openai.com/v1",
     model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    // 全局并发 LLM 请求上限（信号量）：防止多用户同时对话时瞬时请求数打爆上游限流
+    maxConcurrent: parseInt(process.env.AI_MAX_CONCURRENT ?? "20", 10),
   },
 
   speech: {
-    // 语音后端 provider 选择, 等价 voicebox 的平台二选一逻辑
+    // 语音后端 provider 选择（当前仅 dashscope 可用）
     // dashscope = 阿里云百炼 (ASR: qwen3-asr-flash OpenAI兼容, TTS: qwen-audio-3.0-tts-flash)
     dashscopeApiKey: process.env.DASHSCOPE_API_KEY ?? "",
     asrProvider: process.env.SPEECH_ASR_PROVIDER ?? "dashscope",

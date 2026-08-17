@@ -34,7 +34,7 @@ export class Conversation {
 
   @Column({ nullable: true })
   duration: number;
- 
+
   @Column({ type: "float", nullable: true })
   score: number;
 

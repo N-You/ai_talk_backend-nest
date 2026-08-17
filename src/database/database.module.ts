@@ -25,6 +25,13 @@ import config from "../config/config";
         autoLoadEntities: true,
         // 仅开发/测试环境自动同步表结构；生产必须用 migration 管理
         synchronize: process.env.NODE_ENV !== "production",
+        // 显式连接池：TypeORM pg 默认仅 10 个连接，高并发下写入会排队；
+        // max 20 + 空闲回收 + 获取连接超时兜底（避免请求挂死在池上）
+        extra: {
+          max: 20,
+          connectionTimeoutMillis: 5000,
+          idleTimeoutMillis: 30000,
+        },
       }),
     }),
   ],

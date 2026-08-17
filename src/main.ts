@@ -9,7 +9,7 @@ import { WsAdapter } from "@nestjs/platform-ws";
  * 1. 创建 Nest 应用
  * 2. CORS：origin 反射请求源（配合 Bearer token，无需 cookie）
  * 3. 全局 ValidationPipe：DTO 参数校验 + 类型转换（transform）
- * 4. 原生 ws 适配器（兼容 H5/小程序 WebSocket，替代 socket.io）
+ * 4. 原生 ws 适配器（协议级 ping/pong 心跳 + 应用层房间广播，见 ConversationGateway）
  * 5. 启动前校验关键密钥，缺失打印警告（不阻断启动，便于本地开发）
  */
 async function bootstrap() {
@@ -21,7 +21,7 @@ async function bootstrap() {
   // 全局参数校验与转换（DTO 使用 class-validator；未定义 DTO 的接口不受影响）
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: false }));
 
-  // 原生 WebSocket（兼容小程序）
+  // 原生 WebSocket（协议级心跳 + 应用层房间广播，见 ConversationGateway）
   app.useWebSocketAdapter(new WsAdapter(app));
 
   const config = app.get(ConfigService);
