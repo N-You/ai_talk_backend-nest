@@ -20,6 +20,8 @@ import { User } from "../user/entities/user.entity";
 import { ConversationService } from "./conversation.service";
 import { AuthService } from "../auth/auth.service";
 import { AiService, LlmBusyError } from "./ai.service";
+import { KnowledgeService } from "../knowledge/knowledge.service";
+import { SkillService } from "../skills/skill.service";
 
 /**
  * 原生 WebSocket 网关（H5 优先，协议与 uni.connectSocket 兼容）
@@ -69,6 +71,8 @@ export class ConversationGateway
     private readonly convService: ConversationService,
     private readonly authService: AuthService,
     private readonly aiService: AiService,
+    private readonly kbService: KnowledgeService,
+    private readonly skillService: SkillService,
     @InjectRepository(Conversation) private readonly convRepo: Repository<Conversation>,
     @InjectRepository(Message) private readonly msgRepo: Repository<Message>,
     @InjectRepository(Scenario) private readonly scenarioRepo: Repository<Scenario>,
@@ -211,17 +215,7 @@ export class ConversationGateway
 
   /**
    * Streaming 对话入口：收到用户文本 → 流式生成 AI 回复 → 逐块推送（房间广播，多端同步）。
-   *
-   * 完整流程：
-   * 1. 认证/参数/长度(≤2000)/并发锁(busy)/频率限制(30s≤5条) 五重校验
-   * 2. 用户消息立即落库（防丢），并广播给房间内其他连接（发送者除外，由发送端本地乐观渲染）
-   * 3. 历史消息与用户 AI 配置并行查询；历史取最近 20 条（DESC 取最新 + reverse 还原时间序）拼进 LLM 上下文
-   * 4. AbortController 监听客户端 close，断连即中断生成（省 token）
-   * 5. for await chatStream 逐 delta 广播 ai_stream；结束用完整文本落库并广播 ai_done
-   * 6. 异常广播 ai_error：LLM 并发满（LlmBusyError）提示"系统繁忙"，其余透出具体原因（截断 150 字符）
-   *
-   * 注意：不能用 @SubscribeMessage 的 return（那是一次性响应），
-   * 流式必须直接 client.send 逐块推送。
+   * 校验通过后委托 respond() 执行统一回复链路。
    */
   @SubscribeMessage("text")
   async handleText(@ConnectedSocket() client: WebSocket, @MessageBody() body: { conversation_id: number; content: string }) {
@@ -252,33 +246,63 @@ export class ConversationGateway
     });
     if (!conv) return { event: "error", data: { message: "Conversation not found" } };
 
-    // 保存用户消息（立即落库，防丢；必须在历史查询前完成 —— 当前消息靠它进入历史窗口）
+    await this.respond(client, conv, content);
+  }
+
+  /**
+   * 统一回复链路（纯文本口语练习）：
+   * 1. 用户消息落库 + 房间广播
+   * 2. 并行查询历史（最近 30 条）+ 用户（AI 配置 + 长期画像）
+   * 3. 知识库检索：错误类型启发式 → top-4 chunks；画像 → 摘要
+   * 4. system prompt = 场景人设 + 角色 + 场景上下文 + 画像 + 纠错规则 + <knowledge>
+   * 5. 流式生成 → ai_stream / ai_done；异常 → ai_error
+   * 6. 异步更新用户画像（不阻塞回复）
+   */
+  private async respond(client: WebSocket, conv: Conversation, content: string) {
+    const conversation_id = conv.id;
+    const userId = conv.user_id;
+
+    // 1) 落库 + 广播用户消息（发送端本地已乐观渲染，故 exclude）
     await this.convService.addMessage(conversation_id, "user", content);
-    // 房间广播：同一会话的其他端实时看到这条用户消息（发送端本地已乐观渲染，故 exclude）
     this.broadcastToRoom(conversation_id, "user_message", { content }, client);
 
-    // 历史消息与用户 AI 配置互不依赖，并行查询（原来两次串行 DB 往返，减一次）
+    // 2) 历史 + 用户（settings / error_profile）并行查询
     const [history, u] = await Promise.all([
-      this.msgRepo.find({ where: { conversation_id }, order: { created_at: "DESC" }, take: 20 }),
-      this.userRepo.findOneBy({ id: conv.user_id }),
+      this.msgRepo.find({ where: { conversation_id }, order: { created_at: "DESC" }, take: 30 }),
+      this.userRepo.findOneBy({ id: userId }),
     ]);
     history.reverse();
     const settings = u?.settings ?? undefined;
+    const profile = u?.error_profile ?? null;
 
-    // 构建 LLM 消息
-    const systemPrompt = conv.scenario?.system_prompt
-      ? `${conv.scenario.system_prompt}\n\nYou are an AI English Tutor. Keep responses concise and natural. Support Chinese-English mixed input.`
-      : "You are an AI English Tutor. Keep responses concise and natural. Support Chinese-English mixed input.";
+    // 3) 项目 Skill + 知识库检索 + 画像摘要：
+    //    - 按 conversation.scenario.skill_key 取项目 Skill（skills/<key>/skill.json）：
+    //      人设 persona / 行为指令 instructions / 话题 system_prompt 以技能为准，DB 列为 seed 同步副本（fallback）
+    //    - 检索 = 技能专属知识（加权优先） + 全局知识库
+    const skillKey = conv.scenario?.skill_key ?? null;
+    const skill = skillKey ? this.skillService.getSkill(skillKey) : undefined;
+    const sceneSystemPrompt = skill?.system_prompt ?? conv.scenario?.system_prompt ?? null;
+    const scenePersona = skill?.persona ?? conv.scenario?.persona ?? null;
 
-    const messages = [
+    const hints = this.kbService.detectErrorHints(content);
+    const kbChunks = this.kbService.retrieve(content, hints, 4, "", this.skillService.getChunks(skillKey ?? ""));
+    const profileSummary = this.kbService.buildLearnerProfileSummary(profile);
+    // 技能存在 → 按技能组装（人设+指令+话题+画像+知识）；否则回落通用 tutor prompt（默认人设）
+    const systemPrompt = skill
+      ? this.skillService.buildSystemPrompt(skill, kbChunks, profileSummary)
+      : this.kbService.buildTutorSystemPrompt(sceneSystemPrompt, kbChunks, profileSummary, scenePersona);
+
+    // 4) 组装 LLM 消息（纯文本）
+    const messages: { role: string; content: string }[] = [
       { role: "system", content: systemPrompt },
       ...history.map((m) => ({
         role: m.role === "user" ? ("user" as const) : ("assistant" as const),
         content: m.content,
       })),
+      { role: "user", content },
     ];
 
-    // 客户端断开时中断生成（AbortController 节省 token）
+    // 5) 客户端断开时中断生成（AbortController 节省 token）
     const ac = new AbortController();
     const onClose = () => ac.abort();
     client.on("close", onClose);
@@ -319,6 +343,24 @@ export class ConversationGateway
     } finally {
       this.busy.delete(client);
       client.off("close", onClose);
+    }
+
+    // 6) 异步更新学习者画像（不阻塞回复；失败仅告警）
+    this.updateProfile(userId, hints, conv.scenario?.name).catch(() => {});
+  }
+
+  /** 把本轮错误提示累计进用户长期画像（error_profile），并记录近期场景话题 */
+  private async updateProfile(userId: number, hints: string[], topicName?: string) {
+    try {
+      const u = await this.userRepo.findOneBy({ id: userId });
+      if (!u) return;
+      const next = KnowledgeService.mergeErrorHints(u.error_profile, hints);
+      if (topicName) {
+        next.last_seen_topics = [...(next.last_seen_topics ?? []), topicName].slice(-5);
+      }
+      await this.userRepo.update(userId, { error_profile: next });
+    } catch (e) {
+      console.warn("[gateway] profile update failed:", (e as Error).message);
     }
   }
 }

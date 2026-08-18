@@ -1,6 +1,13 @@
 // 种子数据脚本：node -r ts-node/register seed.ts
+// 说明：场景数据以项目 Skill（skills/<key>/skill.json）为唯一数据源（人设 persona + 指令 instructions +
+// 话题 system_prompt + 元数据），本脚本把技能「同步」到 scenarios 表：
+//   - 技能对应场景 → upsert（同名更新字段，保留 conversation 关联）
+//   - 不在任何技能内的旧场景 → 删除（连同其会话，避免外键约束失败）
+// 新增场景 = 新建 skills/<key>/（skill.json + knowledge.jsonl）→ 重跑 seed。
 import "reflect-metadata";
 import { DataSource } from "typeorm";
+import { readFileSync, readdirSync, existsSync } from "fs";
+import { join } from "path";
 import { User } from "./src/user/entities/user.entity";
 import { Scenario } from "./src/scenario/entities/scenario.entity";
 import { Conversation } from "./src/conversation/entities/conversation.entity";
@@ -19,37 +26,89 @@ const ds = new DataSource({
   synchronize: true,
 });
 
-const SEEDS = [
-  // 生活
-  { name: "Coffee Shop", category: "life", description: "在咖啡店点单和交流", difficulty: 1, role: "barista", user_role: "customer", system_prompt: "You are a friendly barista at a coffee shop.", icon: "☕" },
-  { name: "Restaurant", category: "life", description: "餐厅点餐和用餐交流", difficulty: 2, role: "waiter", user_role: "customer", system_prompt: "You are a waiter at a nice restaurant.", icon: "🍽️" },
-  { name: "Hotel Check-in", category: "life", description: "酒店办理入住", difficulty: 2, role: "hotel_receptionist", user_role: "guest", system_prompt: "You are a receptionist at a hotel.", icon: "🏨" },
-  { name: "Airport Check-in", category: "life", description: "机场办理登机相关表达", difficulty: 2, role: "airport_staff", user_role: "passenger", system_prompt: "You are an airport staff member.", icon: "✈️" },
-  { name: "Shopping", category: "life", description: "购物场景交流", difficulty: 1, role: "shop_assistant", user_role: "customer", system_prompt: "You are a helpful shop assistant.", icon: "🛍️" },
-  { name: "Daily Chat", category: "life", description: "日常聊天交流", difficulty: 1, role: "friend", user_role: "friend", system_prompt: "You are a friendly person having a casual chat.", icon: "💬" },
-  // 职场
-  { name: "Job Interview", category: "work", description: "英语面试场景", difficulty: 3, role: "interviewer", user_role: "candidate", system_prompt: "You are a professional interviewer.", icon: "💼" },
-  { name: "Meeting", category: "work", description: "工作会议交流", difficulty: 3, role: "colleague", user_role: "team_member", system_prompt: "You are in a business meeting.", icon: "📊" },
-  { name: "Presentation", category: "work", description: "工作汇报场景", difficulty: 3, role: "manager", user_role: "presenter", system_prompt: "You are a manager listening to a presentation.", icon: "📈" },
-  { name: "Office Chat", category: "work", description: "同事日常交流", difficulty: 2, role: "colleague", user_role: "colleague", system_prompt: "You are a colleague at work.", icon: "💬" },
-  // 程序员
-  { name: "Daily Standup", category: "programmer", description: "每日站会报告", difficulty: 2, role: "scrum_master", user_role: "developer", system_prompt: "You are a Scrum Master running a daily standup.", icon: "💻" },
-  { name: "Code Review", category: "programmer", description: "代码审查交流", difficulty: 3, role: "senior_developer", user_role: "developer", system_prompt: "You are a senior developer conducting a code review.", icon: "🔍" },
-  { name: "Technical Interview", category: "programmer", description: "技术面试", difficulty: 4, role: "tech_interviewer", user_role: "candidate", system_prompt: "You are a technical interviewer.", icon: "🎯" },
-  { name: "Discuss Architecture", category: "programmer", description: "讨论系统架构", difficulty: 4, role: "tech_lead", user_role: "developer", system_prompt: "You are a Tech Lead discussing architecture.", icon: "🏗️" },
-  { name: "Debugging", category: "programmer", description: "调试 Bug 交流", difficulty: 2, role: "pair_programmer", user_role: "developer", system_prompt: "You are pair programming to debug.", icon: "🐛" },
-];
+/** 项目 Skill 根目录：ts-node 运行时 __dirname = backend-nest */
+const SKILLS_DIR = join(__dirname, "skills");
+
+interface SkillJson {
+  key: string;
+  name: string;
+  category?: string;
+  description?: string;
+  difficulty?: number;
+  role?: string;
+  user_role?: string;
+  icon?: string;
+  system_prompt?: string;
+  persona?: string;
+  instructions?: string[];
+}
+
+/** 读取 skills/<key>/skill.json */
+function loadSkills(): SkillJson[] {
+  const skills: SkillJson[] = [];
+  if (!existsSync(SKILLS_DIR)) {
+    console.warn(`技能目录不存在: ${SKILLS_DIR}`);
+    return skills;
+  }
+  for (const entry of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const skillFile = join(SKILLS_DIR, entry.name, "skill.json");
+    if (!existsSync(skillFile)) continue;
+    try {
+      const skill = JSON.parse(readFileSync(skillFile, "utf-8")) as SkillJson;
+      if (skill.key && skill.name) skills.push(skill);
+      else console.warn(`跳过无效技能（缺 key/name）: ${entry.name}`);
+    } catch (e) {
+      console.warn(`技能解析失败，跳过: ${entry.name} (${(e as Error).message})`);
+    }
+  }
+  return skills;
+}
 
 async function seed() {
   await ds.initialize();
   const repo = ds.getRepository(Scenario);
-  const count = await repo.count();
-  if (count > 0) {
-    console.log(`Already ${count} scenarios, skipping seed.`);
-  } else {
-    await repo.save(SEEDS.map((s) => repo.create(s)));
-    console.log(`Seeded ${SEEDS.length} scenarios.`);
+
+  const skills = loadSkills();
+  const existing = await repo.find();
+  const keepKeys = new Set(skills.map((s) => s.key));
+
+  // 1) 删除不属于任何技能的场景（skill_key 为空或不在技能列表；先清关联会话，避免外键约束失败）
+  for (const sc of existing) {
+    const keep = sc.skill_key ? keepKeys.has(sc.skill_key) : false;
+    if (!keep) {
+      await ds.query(`DELETE FROM conversations WHERE scenario_id = $1`, [sc.id]);
+      await repo.delete(sc.id);
+      console.log(`Removed scenario: ${sc.name} (${sc.skill_key ?? "no-skill"})`);
+    }
   }
+
+  // 2) upsert 技能对应场景（按 skill_key 匹配；同名更新字段，保留 conversation 关联）
+  for (const s of skills) {
+    const found = existing.find((e) => e.skill_key === s.key);
+    const row = {
+      name: s.name,
+      category: s.category ?? "life",
+      description: s.description ?? "",
+      difficulty: s.difficulty ?? 1,
+      role: s.role ?? "ai",
+      user_role: s.user_role ?? null,
+      system_prompt: s.system_prompt ?? null,
+      persona: s.persona ?? null,
+      skill_key: s.key,
+      icon: s.icon ?? null,
+    };
+    if (found) {
+      await repo.update(found.id, row);
+      console.log(`Updated scenario: ${s.name} (${s.key})`);
+    } else {
+      await repo.save(repo.create(row));
+      console.log(`Created scenario: ${s.name} (${s.key})`);
+    }
+  }
+
+  const after = await repo.find();
+  console.log(`Scenarios now: ${after.map((s) => `${s.name}(${s.skill_key})`).join(", ")}`);
   await ds.destroy();
 }
 seed();

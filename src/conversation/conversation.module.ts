@@ -9,9 +9,11 @@ import { ConversationService } from "./conversation.service";
 import { ConversationGateway } from "./conversation.gateway";
 import { AiService } from "./ai.service";
 import { AuthModule } from "../auth/auth.module";
+import { KnowledgeModule } from "../knowledge/knowledge.module";
+import { SkillModule } from "../skills/skill.module";
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Conversation, Message, Scenario, User]), AuthModule],
+  imports: [TypeOrmModule.forFeature([Conversation, Message, Scenario, User]), AuthModule, KnowledgeModule, SkillModule],
   controllers: [ConversationController],
   providers: [ConversationService, ConversationGateway, AiService],
 })

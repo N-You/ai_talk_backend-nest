@@ -12,6 +12,7 @@ import { UserLearning } from "../../learning/entities/user-learning.entity";
 /**
  * 用户实体：昵称唯一（H5 免注册的登录凭据）。
  * settings 为 JSON 列，存用户自定义 AI 配置 { apiKey?, apiBase?, model? }。
+ * error_profile 为 JSON 列，存学习者长期画像（错误类型计数/轮次/近期话题，见 KnowledgeService.LearnerProfile）。
  */
 @Entity("users")
 export class User {
@@ -29,6 +30,13 @@ export class User {
 
   @Column({ type: "json", nullable: true })
   settings: { apiKey?: string; apiBase?: string; model?: string } | null;
+
+  @Column({ type: "json", nullable: true })
+  error_profile: {
+    error_counts?: Record<string, number>;
+    total_turns?: number;
+    last_seen_topics?: string[];
+  } | null;
 
   @CreateDateColumn({ type: "timestamptz" })
   created_at: Date;

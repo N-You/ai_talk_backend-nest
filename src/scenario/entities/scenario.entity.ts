@@ -3,7 +3,9 @@ import { Conversation } from "../../conversation/entities/conversation.entity";
 
 /**
  * 对话场景实体：定义 AI 扮演的角色、用户角色、系统提示词与难度。
- * 系统提示词（system_prompt）在会话网关中被拼进 LLM 消息，决定 AI 的扮演风格。
+ * - system_prompt：场景话题上下文（聊什么）
+ * - persona：场景专属人设（AI 是谁、什么语气、怎么回复）——由 KnowledgeService 拼进 PERSONA 段，
+ *   比 system_prompt 更靠前、优先级更高；为空时用默认陪练人设
  */
 @Entity("scenarios")
 export class Scenario {
@@ -30,6 +32,12 @@ export class Scenario {
 
   @Column({ type: "text", nullable: true })
   system_prompt: string;
+
+  @Column({ type: "text", nullable: true, comment: "场景专属人设（身份/语气/回复习惯/主动性）" })
+  persona: string;
+
+  @Column({ length: 64, nullable: true, comment: "关联项目 Skill key（skills/<key>/），运行时加载该技能的人设/指令/专属知识" })
+  skill_key: string;
 
   @Column({ length: 8, nullable: true })
   icon: string;
