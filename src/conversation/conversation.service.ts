@@ -69,8 +69,9 @@ export class ConversationService {
 
   /**
    * 单词释义查询（对话中点击单词弹窗用）：
-   * 复用 AiService.chat 让 LLM 返回结构化 JSON（词/音标/中文释义/例句），
-   * 解析失败或 LLM 无 key 时兜底返回"暂无法解释"，不抛错打断体验。
+   * 复用 AiService.chat 让 LLM 返回结构化 JSON（词/音标/中文释义/例句）。
+   * 健壮性：max_tokens 提到 512 防截断；prompt 强约束 JSON 合法性与引号转义；
+   * 解析采用「整体 parse → 提取 {...} 片段 parse」容错，仍失败才兜底返回。
    */
   async explainWord(userId: number, word: string) {
     const w = word.trim().toLowerCase().slice(0, 60);
@@ -82,9 +83,13 @@ export class ConversationService {
 
     const system = [
       "You are an English-Chinese dictionary.",
-      "Reply with ONLY a JSON object, no markdown, with exactly these keys:",
+      "Reply with ONLY ONE JSON object — no markdown, no code fences, no text before or after:",
       '{"word":"...","phonetic":"/.../","meaning":"中文释义","example":"英文例句（含中文翻译）"}',
-      "Keep meaning concise (one line).",
+      "RULES:",
+      "- Escape every double quote inside a value with a backslash (e.g. He said \\\"hi\\\").",
+      "- meaning: one concise line of Chinese.",
+      "- example: one complete English sentence with its Chinese translation in parentheses.",
+      "- Output valid JSON only.",
     ].join("\n");
 
     try {
@@ -94,9 +99,14 @@ export class ConversationService {
           { role: "user", content: w },
         ],
         settings,
+        512, // 4 个字段的 JSON：256 容易被截断导致解析失败
+        true, // jsonMode：response_format=json_object 强制合法 JSON
       );
-      const cleaned = raw.replace(/```json|```/g, "").trim();
-      const j = JSON.parse(cleaned);
+      const j = this.parseLlmJson(raw);
+      if (!j) {
+        console.warn(`[explainWord] LLM 输出无法解析为 JSON: ${raw.slice(0, 120)}`);
+        return { word: w, phonetic: "", meaning: "暂无法解释该词，请稍后再试", example: "" };
+      }
       return {
         word: typeof j.word === "string" && j.word ? j.word : w,
         phonetic: typeof j.phonetic === "string" ? j.phonetic : "",
@@ -106,5 +116,30 @@ export class ConversationService {
     } catch {
       return { word: w, phonetic: "", meaning: "暂无法解释该词，请稍后再试", example: "" };
     }
+  }
+
+  /**
+   * 从 LLM 输出中尽力提取 JSON 对象（容错三连）：
+   * 1) 清理 markdown 代码块后整体 parse
+   * 2) 提取第一个 { 到最后一个 } 的片段再 parse（兼容多余前后缀文本）
+   * 3) 均失败返回 null（调用方兜底）
+   */
+  private parseLlmJson(raw: string): any | null {
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      // ignore, fall through to fragment extraction
+    }
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        // ignore
+      }
+    }
+    return null;
   }
 }

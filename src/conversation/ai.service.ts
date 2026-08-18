@@ -47,10 +47,15 @@ export class AiService {
   /**
    * 非流式调用（保留：TTS / 其他一次性场景，如 explainWord）。
    * 并发满时抛 LlmBusyError，由调用方降级。
+   * maxTokens：输出上限（默认 256；结构化输出如词典 JSON 建议传 512 避免截断）。
+   * jsonMode：开启 response_format=json_object，强制模型输出合法 JSON（OpenAI / 智谱均支持；
+   *           要求 prompt 中包含 "json" 字样）。
    */
   async chat(
     messages: { role: string; content: string }[],
     userSettings?: { apiKey?: string; apiBase?: string; model?: string },
+    maxTokens = 256,
+    jsonMode = false,
   ): Promise<string> {
     const key = userSettings?.apiKey || this.apiKey;
     const base = (userSettings?.apiBase || this.apiBase).replace(/\/$/, "");
@@ -65,7 +70,7 @@ export class AiService {
     try {
       const res = await this.requestChat(
         `${base}/chat/completions`,
-        this.buildBody(base, model, messages, { max_tokens: 256 }),
+        this.buildBody(base, model, messages, { max_tokens: maxTokens, jsonMode }),
         key,
         new AbortController(),
       );
@@ -187,7 +192,7 @@ export class AiService {
     base: string,
     model: string,
     messages: { role: string; content: string }[],
-    extra: { max_tokens: number; stream?: boolean },
+    extra: { max_tokens: number; stream?: boolean; jsonMode?: boolean },
   ): Record<string, unknown> {
     return {
       model,
@@ -195,6 +200,8 @@ export class AiService {
       max_tokens: extra.max_tokens,
       temperature: 0.7,
       ...(extra.stream ? { stream: true } : {}),
+      // 结构化输出：强制合法 JSON（OpenAI / 智谱均支持；要求 prompt 含 "json" 字样）
+      ...(extra.jsonMode ? { response_format: { type: "json_object" } } : {}),
       // 智谱推理模型默认先输出思维链(reasoning_content)，会挤占 max_tokens 且拖慢首字
       // 仅对智谱端点关闭思考模式；OpenAI 官方 API 不识别该参数，不能无条件携带
       ...(base.includes("bigmodel.cn") ? { thinking: { type: "disabled" } } : {}),
