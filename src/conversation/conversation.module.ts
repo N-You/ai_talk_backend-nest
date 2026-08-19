@@ -16,5 +16,7 @@ import { SkillModule } from "../skills/skill.module";
   imports: [TypeOrmModule.forFeature([Conversation, Message, Scenario, User]), AuthModule, KnowledgeModule, SkillModule],
   controllers: [ConversationController],
   providers: [ConversationService, ConversationGateway, AiService],
+  // 导出 ConversationService：learning 模块复用 explainWord 做生词释义异步补全
+  exports: [ConversationService],
 })
 export class ConversationModule {}

@@ -37,13 +37,15 @@ export class UserController {
   }
 
   /**
-   * 覆盖式保存用户 AI 配置：{ apiKey?, apiBase?, model? } 写入 users.settings JSON 列。
-   * 会话网关读取该配置后优先于 .env 默认值（AiService 中 userSettings 优先）。
+   * 覆盖式保存用户配置：{ apiKey?, apiBase?, model?, dailyWordGoal? } 合并写入 users.settings JSON 列。
+   * 采用 merge（读旧值 + 合并新值）而非整体覆盖，避免前端只更新单字段（如 dailyWordGoal）
+   * 时把已保存的 apiKey/apiBase/model 清掉。会话网关读取该配置后优先于 .env 默认值。
    */
   @Put("settings")
   @UseGuards(JwtAuthGuard)
   async updateSettings(@CurrentUser() user: User, @Body() body: UpdateSettingsDto) {
-    await this.userRepo.update(user.id, { settings: body });
+    const merged = { ...(user.settings ?? {}), ...body };
+    await this.userRepo.update(user.id, { settings: merged });
     return { ok: true };
   }
 }

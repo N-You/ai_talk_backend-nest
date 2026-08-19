@@ -40,6 +40,10 @@ export class UserLearning {
   @Column({ type: "timestamptz", nullable: true })
   next_review_at: Date;
 
+  /** 首次通过「每日新词」完成学习的时间（null = 尚未正式学习，每日新词候选） */
+  @Column({ type: "timestamptz", nullable: true })
+  learned_at: Date;
+
   @CreateDateColumn({ type: "timestamptz" })
   created_at: Date;
 

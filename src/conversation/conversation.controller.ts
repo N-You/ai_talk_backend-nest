@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Param, ParseIntPipe, Body, UseGuards, NotFoundException } from "@nestjs/common";
+import { Controller, Get, Post, Put, Delete, Param, ParseIntPipe, Body, UseGuards, NotFoundException } from "@nestjs/common";
 import { ConversationService } from "./conversation.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -25,6 +25,12 @@ export class ConversationController {
   @Get(":id")
   async detail(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
     return this.service.detail(id, user.id);
+  }
+
+  /** 删除会话（消息级联删除）；仅能删除自己的会话，删除后不可恢复 */
+  @Delete(":id")
+  async remove(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
+    return this.service.remove(id, user.id);
   }
 
   /** 结束会话：记录结束时间、时长（秒）、可选评分与英语使用率 */

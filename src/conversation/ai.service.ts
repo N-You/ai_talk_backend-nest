@@ -53,7 +53,7 @@ export class AiService {
    */
   async chat(
     messages: { role: string; content: string }[],
-    userSettings?: { apiKey?: string; apiBase?: string; model?: string },
+    userSettings?: { apiKey?: string; apiBase?: string; model?: string; temperature?: number },
     maxTokens = 256,
     jsonMode = false,
   ): Promise<string> {
@@ -70,7 +70,11 @@ export class AiService {
     try {
       const res = await this.requestChat(
         `${base}/chat/completions`,
-        this.buildBody(base, model, messages, { max_tokens: maxTokens, jsonMode }),
+        this.buildBody(base, model, messages, {
+          max_tokens: maxTokens,
+          jsonMode,
+          temperature: userSettings?.temperature,
+        }),
         key,
         new AbortController(),
       );
@@ -99,7 +103,7 @@ export class AiService {
    */
   async *chatStream(
     messages: { role: string; content: string }[],
-    userSettings?: { apiKey?: string; apiBase?: string; model?: string },
+    userSettings?: { apiKey?: string; apiBase?: string; model?: string; temperature?: number },
     signal?: AbortSignal,
   ): AsyncGenerator<string> {
     const key = userSettings?.apiKey || this.apiKey;
@@ -120,7 +124,11 @@ export class AiService {
     try {
       const res = await this.requestChat(
         `${base}/chat/completions`,
-        this.buildBody(base, model, messages, { max_tokens: 256, stream: true }),
+        this.buildBody(base, model, messages, {
+          max_tokens: 256,
+          stream: true,
+          temperature: userSettings?.temperature,
+        }),
         key,
         ac,
       );
@@ -187,18 +195,18 @@ export class AiService {
     }
   }
 
-  /** 组装请求体（智谱端点关闭思考模式，理由见类注释） */
+  /** 组装请求体（智谱端点关闭思考模式，理由见类注释）；temperature 可由调用方传入（默认 0.7） */
   private buildBody(
     base: string,
     model: string,
     messages: { role: string; content: string }[],
-    extra: { max_tokens: number; stream?: boolean; jsonMode?: boolean },
+    extra: { max_tokens: number; stream?: boolean; jsonMode?: boolean; temperature?: number },
   ): Record<string, unknown> {
     return {
       model,
       messages,
       max_tokens: extra.max_tokens,
-      temperature: 0.7,
+      temperature: extra.temperature ?? 0.7,
       ...(extra.stream ? { stream: true } : {}),
       // 结构化输出：强制合法 JSON（OpenAI / 智谱均支持；要求 prompt 含 "json" 字样）
       ...(extra.jsonMode ? { response_format: { type: "json_object" } } : {}),

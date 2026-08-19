@@ -27,13 +27,34 @@ export class ConversationService {
     return { ...saved, scenario_name: scenario.name };
   }
 
-  /** 某用户最近 50 条会话（倒序） */
+  /** 某用户最近 50 条会话（倒序，附带场景名供首页"继续练习"展示） */
   async listByUser(userId: number) {
-    return this.convRepo.find({
+    const rows = await this.convRepo.find({
       where: { user_id: userId },
+      relations: ["scenario"],
       order: { started_at: "DESC" },
       take: 50,
     });
+    return rows.map((c) => ({
+      id: c.id,
+      scenario_id: c.scenario_id,
+      scenario_name: c.scenario?.name ?? "历史对话",
+      started_at: c.started_at,
+      ended_at: c.ended_at,
+      duration: c.duration,
+      score: c.score,
+      english_ratio: c.english_ratio,
+    }));
+  }
+
+  /**
+   * 删除会话：归属校验内嵌在 delete 条件 { id, user_id } 中（防越权）。
+   * messages 通过外键级联删除（onDelete: CASCADE），无需手动清理。
+   */
+  async remove(id: number, userId: number) {
+    const result = await this.convRepo.delete({ id, user_id: userId });
+    if (!result.affected) throw new NotFoundException("Conversation not found");
+    return { ok: true };
   }
 
   /**

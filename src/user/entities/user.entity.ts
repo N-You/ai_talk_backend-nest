@@ -29,7 +29,14 @@ export class User {
   level: string;
 
   @Column({ type: "json", nullable: true })
-  settings: { apiKey?: string; apiBase?: string; model?: string } | null;
+  settings: {
+    apiKey?: string;
+    apiBase?: string;
+    model?: string;
+    dailyWordGoal?: number;
+    speed?: number;
+    temperature?: number;
+  } | null;
 
   @Column({ type: "json", nullable: true })
   error_profile: {

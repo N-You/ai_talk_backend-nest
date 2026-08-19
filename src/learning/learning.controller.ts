@@ -25,10 +25,39 @@ export class LearningController {
     return this.service.list(user.id, +page, +size, type, status, search);
   }
 
-  /** 添加学习内容（对话中"记录表达"、学习库手动添加共用） */
+  /** 添加学习内容（对话中"记录表达"、学习库手动添加共用）；meta 可选携带释义/音标/例句 */
   @Post()
-  async add(@CurrentUser() user: User, @Body() body: { content: string }) {
-    return this.service.add(user.id, body.content);
+  async add(
+    @CurrentUser() user: User,
+    @Body() body: { content: string; meaning?: string; phonetic?: string; example?: string },
+  ) {
+    return this.service.add(user.id, body.content, {
+      meaning: body.meaning,
+      phonetic: body.phonetic,
+      example: body.example,
+    });
+  }
+
+  /**
+   * 今日学习计划总览：{ goal, new_done, new_total, reviews_due, reviews_done,
+   * mastered_total, streak_days, today_words }。首页/生词本/练习页共用。
+   */
+  @Get("daily")
+  async daily(@CurrentUser() user: User) {
+    return this.service.getDailyPlan(user.id, user.settings);
+  }
+
+  /**
+   * 单词-意思匹配测验：type ∈ new/review/mixed，count 每题数（默认 10，上限 50）。
+   * 返回 { items: [{ id, content, phonetic, is_new, options[], answer_index }], mode, total }。
+   */
+  @Get("quiz")
+  async quiz(
+    @CurrentUser() user: User,
+    @Query("type") type?: string,
+    @Query("count") count = 10,
+  ) {
+    return this.service.quiz(user.id, type, Math.min(50, Math.max(1, +count)));
   }
 
   @Get(":id")
@@ -53,5 +82,14 @@ export class LearningController {
     @Body() body: { result: string },
   ) {
     return this.service.review(user.id, id, body.result);
+  }
+
+  /**
+   * 完成一个新词学习（每日新词意思匹配答对后调用）：
+   * 标记 learned_at（今日进度 +1），next_review_at 设为明天 → 次日进入复习队列。
+   */
+  @Post(":id/learn")
+  async learn(@CurrentUser() user: User, @Param("id", ParseIntPipe) id: number) {
+    return this.service.learn(user.id, id);
   }
 }
